@@ -23,11 +23,20 @@ def _correlation_id_for_request(request: Request) -> str | None:
 
 
 def _json_error_response(request: Request, status_code: int, error: object) -> JSONResponse:
+    """Render an error response in the FastAPI-default `{"detail": ...}`
+    shape, plus a `correlation_id` field for distributed tracing.
+
+    Using `detail` (not `error`) because:
+    - FastAPI's built-in `HTTPException` and `RequestValidationError`
+      already use `detail` — preserving the key keeps existing
+      consumer tests and clients working without rewrites
+    - OpenAPI schema generation expects `detail`
+    """
     correlation_id = _correlation_id_for_request(request)
     response = JSONResponse(
         status_code=status_code,
         content={
-            "error": error,
+            "detail": error,
             "correlation_id": correlation_id,
         },
     )
