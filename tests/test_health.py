@@ -8,17 +8,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from ai_trading_common.health import (
-    DependencyCheck,
-    configure_health,
-    health_router,
-)
+from ai_trading_common.health import DependencyCheck, configure_health
 
 
 @pytest.fixture(autouse=True)
 def _reset_health_state():
     DependencyCheck.clear()
-    configure_health("test-service", "1.0.0")
     yield
     DependencyCheck.clear()
 
@@ -26,8 +21,16 @@ def _reset_health_state():
 @pytest.fixture
 def app() -> FastAPI:
     app = FastAPI()
-    app.include_router(health_router)
+    configure_health(app, "test-service", "1.0.0")
     return app
+
+
+def test_configure_health_is_idempotent() -> None:
+    app = FastAPI()
+    configure_health(app, "svc", "1.0.0")
+    configure_health(app, "svc", "1.0.0")  # second call — must not double-mount
+    health_routes = [r for r in app.router.routes if getattr(r, "path", "").startswith("/health")]
+    assert len(health_routes) == 3, "expected exactly /health, /health/ready, /health/live"
 
 
 def test_shallow_health_returns_alive(app: FastAPI) -> None:
