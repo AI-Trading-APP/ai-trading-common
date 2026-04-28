@@ -2,18 +2,18 @@
 Deep health check router — provides /health, /health/ready, /health/live endpoints.
 
 Usage:
-    from ai_trading_common.health import health_router, DependencyCheck, configure_health
+    from ai_trading_common import configure_health, DependencyCheck
 
-    configure_health("userservice", "3.0.0")
+    configure_health(app, "userservice", "3.0.0")
     DependencyCheck.register("postgresql", check_postgres_fn)
-    app.include_router(health_router, tags=["health"])
+    # configure_health includes the router on `app` for you.
 """
 
 import asyncio
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, FastAPI
 from fastapi.responses import JSONResponse
 
 
@@ -23,10 +23,20 @@ _start_time = time.time()
 _service_meta = {"name": "unknown", "version": "0.0.0"}
 
 
-def configure_health(service_name: str, version: str):
-    """Set service metadata returned in health responses."""
+def configure_health(app: FastAPI, service_name: str, version: str) -> None:
+    """Set service metadata and mount the health router on `app`.
+
+    One-call wire-up: stores name/version for the health responses, then
+    `app.include_router(health_router, tags=["health"])`. Idempotent —
+    safe to call again on the same app (router is mounted once per app).
+    """
     _service_meta["name"] = service_name
     _service_meta["version"] = version
+    # Avoid double-mounting if the caller (or a test) re-runs this.
+    for route in app.router.routes:
+        if getattr(route, "path", None) == "/health":
+            return
+    app.include_router(health_router, tags=["health"])
 
 
 class DependencyCheck:
