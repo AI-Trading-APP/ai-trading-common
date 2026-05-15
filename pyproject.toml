@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-trading-common"
-version = "0.2.3"
-description = "Shared observability and middleware for AI-Trading-APP services"
+version = "0.3.0"
+description = "Shared observability, middleware, and schema-migration runner for AI-Trading-APP services"
 readme = "README.md"
 requires-python = ">=3.11"
 # Loose floors — the modules use only stable surface area
@@ -21,14 +21,23 @@ dependencies = [
 [project.optional-dependencies]
 sentry = ["sentry-sdk[fastapi,sqlalchemy]>=2.0.0"]
 ratelimit = ["slowapi>=0.1.9"]
+# BB-GA-4 schema-drift safety net — services that need the migration runner
+# install `ai-trading-common[migrations]`. Others don't pay the dep cost.
+migrations = ["psycopg[binary]>=3.1"]
 test = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "httpx>=0.27",
 ]
 
+[project.scripts]
+ai-trading-migrations = "ai_trading_common.migrations.__main__:main"
+
 [tool.setuptools]
-packages = ["ai_trading_common"]
+packages = ["ai_trading_common", "ai_trading_common.migrations"]
+
+[tool.setuptools.package-data]
+"ai_trading_common.migrations" = ["bootstrap.sql"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
