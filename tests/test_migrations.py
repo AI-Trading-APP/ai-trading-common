@@ -81,6 +81,21 @@ def test_discover_mixes_flyway_and_numeric_convention(tmp_path: Path) -> None:
     assert [m.migration_id for m in result] == ["001_legacy", "V2__newer", "003_back_to_numeric"]
 
 
+def test_discover_excludes_rollback_scripts(tmp_path: Path) -> None:
+    """Rollback/undo scripts living beside forward migrations must NOT be applied.
+
+    The PE convention puts ``V<n>__rollback_<slug>.sql`` next to
+    ``V<n>__create_<slug>.sql``; without exclusion, apply would run create then
+    immediately the rollback and drop what it created.
+    """
+    _write(tmp_path, "V1__create_thing.sql")
+    _write(tmp_path, "V1__rollback_create_thing.sql")
+    _write(tmp_path, "V2__create_other.sql")
+    _write(tmp_path, "V2__rollback_create_other.sql")
+    result = discover_migrations(tmp_path)
+    assert [m.migration_id for m in result] == ["V1__create_thing", "V2__create_other"]
+
+
 def test_discover_ignores_non_sql_files(tmp_path: Path) -> None:
     _write(tmp_path, "001_real.sql")
     _write(tmp_path, "README.md", "# not a migration")

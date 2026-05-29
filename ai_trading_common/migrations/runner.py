@@ -52,14 +52,24 @@ class Migration:
 
 
 def discover_migrations(migrations_dir: Path) -> list[Migration]:
-    """Returns all *.sql files in the dir, sorted deterministically.
+    """Returns forward *.sql migrations in the dir, sorted deterministically.
 
     No directory or zero files is a valid state — returns []. Callers decide
     whether that is OK (it is, for services that have no migrations yet).
+
+    Rollback/undo scripts that live alongside forward migrations are EXCLUDED:
+    a file whose stem contains ``__rollback`` (e.g. the PE convention
+    ``V<n>__rollback_<slug>.sql``) is an undo script and must never run as a
+    forward migration — otherwise ``apply`` would execute ``V1__create`` then
+    immediately ``V1__rollback`` and drop what it just created.
     """
     if not migrations_dir.exists() or not migrations_dir.is_dir():
         return []
-    migrations = [Migration.from_path(p) for p in sorted(migrations_dir.glob("*.sql"))]
+    forward = [
+        p for p in sorted(migrations_dir.glob("*.sql"))
+        if "__rollback" not in p.stem.lower()
+    ]
+    migrations = [Migration.from_path(p) for p in forward]
     migrations.sort(key=lambda m: m.sort_key)
     return migrations
 
