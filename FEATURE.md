@@ -2,6 +2,7 @@
 
 **Branch:** feature/platform-reliability-taxonomy  
 **Repo:** ai-trading-common  
+**Commit:** fd64bee  
 **Last updated:** 2026-07-03
 
 ---
@@ -33,19 +34,36 @@
   Tests updated to match the same idiom.
 - `cause_category` serialised via `str()` (works for both `CauseCategory` enum and raw strings)
   in both `_json_error_response` and `DependencyCheck.run_all`.
+- **Block 0 PRs target `development` branch** (ai-trading-common has no release branch; other
+  services have independent release flows).
+- Block 1 (adminserv + admin-app) built in parallel (independent, no COMANticipated on Block 0 merge).
+- All work is additive and backward-compatible (shim dual-signature preserves existing code paths).
 
 ---
 
 ## Next
 
-1. Open PR from `feature/platform-reliability-taxonomy` → `development`.
-2. 2-reviewer gate (2 reviewers must approve before merge per project protocol).
-3. After merge: archive this file → `docs/features/platform-reliability-taxonomy.md`.
-4. Release lock in `.coordination/locks.md` if claimed.
+**PAUSED at Block 3 scope gate, pending owner scope decision.**
+
+If proceeding with full P1 console (Block 3):
+
+1. Block 0 (COM-1/COM-2/TEST-1) **MUST merge to `development` FIRST** — submit PR from this branch,
+   pass 2-reviewer gate (§2 SDLC), then merge.
+2. Once Block 0 merged to development: Block 1 (adminserv + admin-app) PRs open → 2-reviewer → merge.
+3. Then Block 3a–3f proceed per `specs/platform-reliability/roadmap.md` (health-wiring across 4 services,
+   adminserv console backend endpoints, admin-app UI build-out, E2E validation, deploy + staging verification).
+
+If deferring P1 console: keep this branch alive; no close-out. Reopen when scope is decided.
 
 ---
 
 ## Resume Pointer
 
-All code + tests committed on this branch. No DB migrations required. No frontend changes.
-Start a fresh session by reading this file and running `git log development..HEAD`.
+**Worktree:** `/Users/kasireddy/Personal_Projects/AI-Trading-APP/ai-trading-common-feat-platform-reliability-taxonomy`  
+**Branch:** `feature/platform-reliability-taxonomy`  
+**Commit:** `fd64bee`  
+**Next session:** read this file, then `git log development..HEAD` to see all commits on this branch.  
+**Spec context:** `specs/platform-reliability/design.md` Block 0 section.
+
+All code + tests committed. No DB migrations. TypeScript mirror (aitradingnode/lib/types/causeCategory.ts)
+created but uncommitted in aitradingnode (separate repo, independent feature branch).
