@@ -23,20 +23,40 @@ _start_time = time.time()
 _service_meta = {"name": "unknown", "version": "0.0.0"}
 
 
-def configure_health(app: FastAPI, service_name: str, version: str) -> None:
-    """Set service metadata and mount the health router on `app`.
+def configure_health(app_or_name, service_name_or_ver: str = None, version: str = None) -> None:
+    """Set service metadata and (optionally) mount the health router on `app`.
 
-    One-call wire-up: stores name/version for the health responses, then
-    `app.include_router(health_router, tags=["health"])`. Idempotent —
-    safe to call again on the same app (router is mounted once per app).
+    Supports two call styles for backward-compatibility:
+
+        configure_health(app, name, ver)   # app-first (original signature)
+        configure_health(name, ver)        # name-first (no app)
+
+    The shim detects whether the first positional argument is a FastAPI /
+    Starlette application instance or a plain string name, and dispatches
+    accordingly.  Both styles are idempotent and safe to call more than once.
     """
-    _service_meta["name"] = service_name
-    _service_meta["version"] = version
-    # Avoid double-mounting if the caller (or a test) re-runs this.
-    for route in app.router.routes:
-        if getattr(route, "path", None) == "/health":
-            return
-    app.include_router(health_router, tags=["health"])
+    from starlette.applications import Starlette
+
+    if isinstance(app_or_name, (FastAPI, Starlette)):
+        # Original (app, name, ver) style.
+        app: FastAPI = app_or_name
+        service_name: str = service_name_or_ver
+        ver: str = version
+        _service_meta["name"] = service_name
+        _service_meta["version"] = ver
+        # Avoid double-mounting if the caller (or a test) re-runs this.
+        # FastAPI wraps included routers in _IncludedRouter dataclass objects
+        # that expose `original_router`; we check identity against our singleton.
+        for route in app.router.routes:
+            if getattr(route, "original_router", None) is health_router:
+                return
+        app.include_router(health_router, tags=["health"])
+    else:
+        # (name, ver) style — no app to mount on.
+        service_name = app_or_name          # first arg is actually the name
+        ver = service_name_or_ver           # second arg is the version
+        _service_meta["name"] = service_name
+        _service_meta["version"] = ver
 
 
 class DependencyCheck:
@@ -57,11 +77,28 @@ class DependencyCheck:
         results = {}
         for name, fn in cls._checks.items():
             try:
-                ok, latency = await asyncio.wait_for(fn(), timeout=timeout)
-                results[name] = {
+                raw = await asyncio.wait_for(fn(), timeout=timeout)
+                # Support both (ok, latency) and (ok, latency, extras) returns.
+                # extras is a dict that MAY contain:
+                #   cause_category      – str | None
+                #   last_known_good_ts  – ISO-8601 str | None
+                if len(raw) == 2:
+                    ok, latency = raw
+                    extras: dict = {}
+                else:
+                    ok, latency, extras = raw[0], raw[1], raw[2]
+                entry: dict = {
                     "status": "healthy" if ok else "unhealthy",
                     "latency_ms": round(latency, 1),
                 }
+                # Thread optional reliability fields through only when present.
+                cause_category = extras.get("cause_category") if extras else None
+                last_known_good_ts = extras.get("last_known_good_ts") if extras else None
+                if cause_category is not None:
+                    entry["cause_category"] = str(cause_category)
+                if last_known_good_ts is not None:
+                    entry["last_known_good_ts"] = str(last_known_good_ts)
+                results[name] = entry
             except asyncio.TimeoutError:
                 results[name] = {"status": "unhealthy", "error": "timeout", "latency_ms": None}
             except Exception as e:
