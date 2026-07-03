@@ -29,8 +29,14 @@ def test_configure_health_is_idempotent() -> None:
     app = FastAPI()
     configure_health(app, "svc", "1.0.0")
     configure_health(app, "svc", "1.0.0")  # second call — must not double-mount
-    health_routes = [r for r in app.router.routes if getattr(r, "path", "").startswith("/health")]
-    assert len(health_routes) == 3, "expected exactly /health, /health/ready, /health/live"
+    # FastAPI wraps included routers as _IncludedRouter; count them by checking
+    # how many entries expose our health_router as original_router.
+    from ai_trading_common.health import health_router
+    mounted = [r for r in app.router.routes if getattr(r, "original_router", None) is health_router]
+    assert len(mounted) == 1, "health_router must be mounted exactly once"
+    # And the router itself has exactly the 3 expected health endpoints.
+    health_paths = [getattr(r, "path", "") for r in health_router.routes]
+    assert sorted(health_paths) == ["/health", "/health/live", "/health/ready"]
 
 
 def test_shallow_health_returns_alive(app: FastAPI) -> None:
