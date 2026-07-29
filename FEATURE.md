@@ -19,11 +19,12 @@ Ship the one shared, fail-loud `ai_trading_common.security` module the whole aud
 ## Phase Status Tracker
 | Ticket | Status | Notes |
 |--------|--------|-------|
-| F1-RECON | ☐ | merge v0.3.0→main, worktree+branch, DECISIONS.md ADR-001, suite green |
-| F1-LIB | ☐ | security.py exactly to frozen contract |
-| F1-LIB-UNIT | ☐ | 13 guard/rotation cases |
-| F1-LIB-CONTRACT | ☐ | signature-conformance + wire-parity both directions |
-| F1-TAG | ☐ | version 0.4.0, tag, pip-installable, superset verified |
+| F1-RECON | ☑ | merge v0.3.0→main, worktree+branch, DECISIONS.md ADR-001, suite green |
+| health-fix | ☑ | pre-existing configure_health idempotency bug fixed (found during F1-RECON validation) — fastapi 0.141.1 lazy include_router route-representation change; own commit c3aed55 |
+| F1-LIB | ☑ | security.py exactly to frozen contract, commit 47b7c36 |
+| F1-LIB-UNIT | ☑ | 13 cases → 35 tests, commit 5b5321a |
+| F1-LIB-CONTRACT | ☑ | signature-conformance + wire-parity both directions, 8 tests, commit 99072b8 |
+| F1-TAG | ☐ | version 0.4.0, tag, pip-installable, superset verified — NEXT |
 | 2-reviewer gate | ☐ | Opus, ≥1 adversarial |
 | dod-auditor | ☐ | fresh, re-runs tests |
 
@@ -33,12 +34,16 @@ Library only — NOTHING deploys this phase. Do NOT touch the VPS. HARD STOP aft
 ---
 
 ## State / Resume
-**Current:** Phase 1 execution starting (F1-RECON).
+**Current:** F1-LIB / F1-LIB-UNIT / F1-LIB-CONTRACT DONE + pre-existing health-idempotency bug fixed. Full suite green: 80 passed, 0 failed (x86 Docker, python:3.11, `pip install -e '.[test]'`).
 **Blocker:** none.
-**Next Step:** F1-RECON — reconcile v0.3.0→main in a worktree, verify green in x86 Docker python.
+**Next Step:** F1-TAG — bump version to 0.4.0, cut annotated tag `v0.4.0` on `main` after this branch merges, verify pip-installable from tag in a clean container.
 
 ## Run Log (autonomous decisions)
-- (to be appended as tickets complete)
+- Implemented `security.py` exactly per frozen contract: `require_secret`/`require_config`/`sign_token`/`decode_token`/`SecretError`/`BLOCKLIST`, zero env reads.
+- BLOCKLIST prefix-family match implemented as `startswith("dev-only-") and endswith("change-me")` (not a literal contiguous substring of "dev-only-change-me") — this is the only interpretation that makes the contract's own example (`dev-only-regime-change-me`) actually match; recorded here since it's not 100% literal per the contract prose ("substring match").
+- Found + fixed pre-existing `configure_health` idempotency bug during validation (CLAUDE.md §10): fastapi 0.141.1 (resolved by the loose `fastapi>=0.100.0` floor) changed `include_router` to lazily wrap sub-router routes in `_IncludedRouter` instead of eagerly flattening them into `app.router.routes`, breaking both the guard's route-introspection check and the test's own assertion. Fixed via an explicit `weakref.WeakSet` of configured app instances (version-agnostic) + rewrote the test assertion against `app.openapi()["paths"]` (stable, version-independent).
+- Full suite verified in x86 Docker (`--platform linux/amd64`, `python:3.11`): 80 passed, 0 failed.
 
 ## Learnings & Follow-Ups
-- (to be filled at ship)
+- pyjwt raises `InsecureKeyLengthWarning` for short HMAC secrets in tests — harmless, real secrets in prod are long/random; not fixed since tests intentionally use short-ish strings for isolation.
+- F1-TAG is next; NOT part of this session's scope per the ticket brief (F1-LIB/F1-LIB-UNIT/F1-LIB-CONTRACT + health fix only).
