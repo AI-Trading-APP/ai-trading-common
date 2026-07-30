@@ -11,6 +11,7 @@ Usage:
 
 import asyncio
 import time
+import weakref
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, FastAPI
@@ -21,6 +22,16 @@ health_router = APIRouter()
 
 _start_time = time.time()
 _service_meta = {"name": "unknown", "version": "0.0.0"}
+
+# Tracks which FastAPI app instances already had the health router mounted.
+# NOTE: newer FastAPI/Starlette releases (0.11x+) wrap `include_router`
+# results in a lazily-resolved `_IncludedRouter` object rather than eagerly
+# flattening the sub-router's routes into `app.router.routes` — so
+# introspecting `app.router.routes` for a `path == "/health"` entry (the
+# prior approach) silently found nothing and re-ran `include_router` every
+# call. Tracking membership explicitly is robust across FastAPI/Starlette
+# route-representation changes.
+_configured_apps: "weakref.WeakSet[FastAPI]" = weakref.WeakSet()
 
 
 def configure_health(app: FastAPI, service_name: str, version: str) -> None:
@@ -33,10 +44,10 @@ def configure_health(app: FastAPI, service_name: str, version: str) -> None:
     _service_meta["name"] = service_name
     _service_meta["version"] = version
     # Avoid double-mounting if the caller (or a test) re-runs this.
-    for route in app.router.routes:
-        if getattr(route, "path", None) == "/health":
-            return
+    if app in _configured_apps:
+        return
     app.include_router(health_router, tags=["health"])
+    _configured_apps.add(app)
 
 
 class DependencyCheck:

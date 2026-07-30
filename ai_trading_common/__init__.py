@@ -17,6 +17,9 @@ Public API (v0.2):
         register_exception_handlers, CauseCategory,
         # Sentry
         setup_sentry,
+        # Security (fail-loud secrets + rotation-safe JWT)
+        SecretError, BLOCKLIST, require_secret, require_config,
+        sign_token, decode_token,
     )
 
 Each service should:
@@ -27,7 +30,7 @@ Each service should:
    shared package.
 """
 
-__version__ = "0.2.3"
+__version__ = "0.4.0"
 
 from ai_trading_common.logging_config import setup_logging, get_logger
 from ai_trading_common.correlation import CorrelationMiddleware, get_correlation_headers, get_correlation_id
@@ -35,6 +38,14 @@ from ai_trading_common.errors import register_exception_handlers, CauseCategory
 from ai_trading_common.health import health_router, DependencyCheck, configure_health
 from ai_trading_common.metrics import MetricsMiddleware, metrics_endpoint
 from ai_trading_common.sentry_setup import setup_sentry
+from ai_trading_common.security import (
+    SecretError,
+    BLOCKLIST,
+    require_secret,
+    require_config,
+    sign_token,
+    decode_token,
+)
 
 __all__ = [
     "setup_logging",
@@ -50,4 +61,10 @@ __all__ = [
     "register_exception_handlers",
     "CauseCategory",
     "setup_sentry",
+    "SecretError",
+    "BLOCKLIST",
+    "require_secret",
+    "require_config",
+    "sign_token",
+    "decode_token",
 ]

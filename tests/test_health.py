@@ -29,8 +29,15 @@ def test_configure_health_is_idempotent() -> None:
     app = FastAPI()
     configure_health(app, "svc", "1.0.0")
     configure_health(app, "svc", "1.0.0")  # second call — must not double-mount
-    health_routes = [r for r in app.router.routes if getattr(r, "path", "").startswith("/health")]
-    assert len(health_routes) == 3, "expected exactly /health, /health/ready, /health/live"
+    # Use the flattened OpenAPI path map rather than raw `app.router.routes`:
+    # newer FastAPI/Starlette versions wrap `include_router` results in a
+    # lazily-resolved object that doesn't eagerly expose child paths via
+    # `.path` on `app.router.routes` entries, but `app.openapi()["paths"]`
+    # is a stable, version-independent view of the fully-resolved route table.
+    health_paths = sorted(p for p in app.openapi()["paths"] if p.startswith("/health"))
+    assert health_paths == ["/health", "/health/live", "/health/ready"], (
+        "expected exactly /health, /health/ready, /health/live with no duplicates"
+    )
 
 
 def test_shallow_health_returns_alive(app: FastAPI) -> None:
