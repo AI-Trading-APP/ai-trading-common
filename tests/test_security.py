@@ -200,6 +200,23 @@ def test_decode_token_expired_raises_expired_signature_error() -> None:
         decode_token(token, VALID_SECRET)
 
 
+def test_decode_token_rotation_window_expired_old_secret_raises_expired_not_invalid() -> None:
+    # SEV-3 regression (ADR-003 rotation-window refresh flow): a token
+    # validly signed by S_old but already expired must surface
+    # ExpiredSignatureError even though the loop goes on to try S_new
+    # (whose InvalidSignatureError must NOT shadow the earlier, more
+    # meaningful expired verdict). Refresh handlers catch
+    # ExpiredSignatureError specifically to trigger re-issuance; masking it
+    # as a generic invalid-token error breaks zero-downtime rotation.
+    s_old = "old-secret-value-abcdefghijklmnop"
+    s_new = "new-secret-value-qrstuvwxyz123456"
+    token_signed_with_old_expired = sign_token(
+        {"sub": "svc-a"}, s_old, expires_in=-10
+    )
+    with pytest.raises(jwt.ExpiredSignatureError):
+        decode_token(token_signed_with_old_expired, [s_old, s_new])
+
+
 # --- 12: tampered token -------------------------------------------------------
 
 

@@ -212,6 +212,20 @@ def decode_token(
     PyJWT wire semantics) if NO candidate secret verifies a well-formed
     token. Raises :class:`SecretError` if ALL candidate secrets are
     themselves invalid VALUES (misconfiguration, not a bad token).
+
+    Multi-secret error precedence (expired-beats-invalid): PyJWT only
+    reaches the ``exp`` check after a candidate's signature verifies, so an
+    ``ExpiredSignatureError`` on ANY candidate proves that candidate is the
+    token's genuine signer — the token is validly-ours but expired. If no
+    candidate verifies outright, and at least one candidate raised
+    ``ExpiredSignatureError``, that verdict is raised in preference to any
+    ``InvalidSignatureError``/other ``InvalidTokenError`` seen on the other
+    candidates (regardless of try order) — never "whichever candidate was
+    tried last". This matters specifically for the rotation window
+    (``[S_old, S_new]``): a token signed by ``S_old`` that has since expired
+    must not be masked as a generic invalid token just because it also
+    fails to verify against ``S_new``, since refresh handlers key off
+    ``ExpiredSignatureError`` to trigger re-issuance.
     """
     candidates: list[str] = [secrets] if isinstance(secrets, str) else list(secrets)
 
@@ -234,7 +248,23 @@ def decode_token(
             f"{len(secret_errors)} secret(s) failed validation"
         )
 
-    last_error: Exception | None = None
+    # Error precedence across the candidate loop (SEV-3 fix, ADR-003):
+    # PyJWT only reaches the ``exp`` check AFTER the signature verifies, so
+    # ``ExpiredSignatureError`` from any candidate means that candidate's
+    # secret IS the token's genuine signer — the token is validly-ours but
+    # expired. That fact must never be shadowed by a LATER candidate's
+    # ``InvalidSignatureError`` (a mismatched secret, which carries no
+    # information once we already know who signed it). We therefore keep
+    # looping (in case an EARLIER-tried secret was merely the wrong one and
+    # a later one turns out to verify cleanly), but once any candidate
+    # yields "expired", that verdict wins over any invalid-signature verdict
+    # seen on other candidates — expired-beats-invalid, not last-wins. This
+    # is required for the refresh-handler flow, which catches
+    # ``ExpiredSignatureError`` specifically to trigger re-issuance during a
+    # secret rotation window; masking it as a generic invalid token breaks
+    # zero-downtime rotation.
+    expired_error: jwt.ExpiredSignatureError | None = None
+    last_invalid_error: jwt.InvalidTokenError | None = None
     for valid_secret in valid_secrets:
         try:
             return jwt.decode(
@@ -244,15 +274,14 @@ def decode_token(
                 options=decode_options,
             )
         except jwt.ExpiredSignatureError as exc:
-            # A well-formed, correctly-signed-but-expired token: no other
-            # secret in the rotation set would change the expiry outcome,
-            # but keep trying in case a different secret is the actual
-            # signer (still expired either way) — preserve the most
-            # meaningful error to re-raise if nothing verifies.
-            last_error = exc
+            expired_error = exc
         except jwt.InvalidTokenError as exc:
-            last_error = exc
+            last_invalid_error = exc
 
-    # No candidate secret verified the token.
-    assert last_error is not None
-    raise last_error
+    # No candidate secret verified the token. Prefer a genuine
+    # "validly-signed-but-expired" verdict over a mere "no secret matched"
+    # verdict from a different candidate.
+    if expired_error is not None:
+        raise expired_error
+    assert last_invalid_error is not None
+    raise last_invalid_error
