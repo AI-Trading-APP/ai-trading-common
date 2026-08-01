@@ -89,6 +89,56 @@ def test_require_secret_prefix_family_substring_raises() -> None:
         require_secret("dev-only-regime-change-me", name="jwt-secret")
 
 
+# --- 5b: minimum key-length guard (v0.4.1) ---------------------------------
+
+
+def test_require_secret_too_short_raises() -> None:
+    # 31 bytes — one below the 32-byte (256-bit) HMAC floor.
+    short = "x" * 31
+    assert len(short.encode("utf-8")) == 31
+    with pytest.raises(SecretError):
+        require_secret(short, name="jwt-secret")
+
+
+def test_require_secret_exactly_min_length_passes() -> None:
+    exactly = "y" * 32
+    assert require_secret(exactly, name="jwt-secret") == exactly
+
+
+def test_require_secret_length_measured_in_utf8_bytes_not_chars() -> None:
+    # 16 multi-byte chars = 16 code points but > 32 UTF-8 bytes; a naive
+    # len()==chars check would wrongly reject this valid-length secret.
+    multibyte = "é" * 16  # é = 2 UTF-8 bytes each -> 32 bytes, 16 chars
+    assert len(multibyte) == 16
+    assert len(multibyte.encode("utf-8")) == 32
+    assert require_secret(multibyte, name="jwt-secret") == multibyte
+
+
+def test_require_secret_too_short_allow_insecure_returns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="ai_trading_common.security")
+    result = require_secret("short", name="jwt-secret", allow_insecure=True)
+    assert result == "short"
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+
+
+def test_require_secret_custom_min_length() -> None:
+    with pytest.raises(SecretError):
+        require_secret("a" * 40, name="jwt-secret", min_length=64)
+    assert require_secret("a" * 64, name="jwt-secret", min_length=64) == "a" * 64
+
+
+def test_require_secret_min_length_zero_disables_check() -> None:
+    assert require_secret("tiny", name="jwt-secret", min_length=0) == "tiny"
+
+
+def test_sign_token_short_secret_raises() -> None:
+    # sign_token inherits the 32-byte floor via require_secret.
+    with pytest.raises(SecretError):
+        sign_token({"sub": "user-1"}, "short-secret")
+
+
 # --- 6: valid value passes through ------------------------------------------
 
 
@@ -215,6 +265,27 @@ def test_decode_token_rotation_window_expired_old_secret_raises_expired_not_inva
     )
     with pytest.raises(jwt.ExpiredSignatureError):
         decode_token(token_signed_with_old_expired, [s_old, s_new])
+
+
+# --- 11b: dropped-candidate diagnostic (v0.4.1 HIGH mitigation) ------------
+
+
+def test_decode_token_logs_warning_when_a_candidate_secret_is_skipped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A short (invalid) legacy secret alongside a valid one: the token
+    # verifies via the valid secret, but the skipped short candidate must be
+    # logged at WARNING so a short->long rotation window is diagnosable.
+    short_legacy = "short-secret"  # < 32 bytes -> rejected
+    valid_new = "new-secret-value-qrstuvwxyz123456"  # 33 bytes
+    token = sign_token({"sub": "svc-a"}, valid_new)
+    caplog.set_level(logging.WARNING, logger="ai_trading_common.security")
+    claims = decode_token(token, [short_legacy, valid_new])
+    assert claims["sub"] == "svc-a"
+    assert any(
+        record.levelno == logging.WARNING and "skipped" in record.message
+        for record in caplog.records
+    )
 
 
 # --- 12: tampered token -------------------------------------------------------

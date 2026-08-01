@@ -30,7 +30,7 @@ Each service should:
    shared package.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 from ai_trading_common.logging_config import setup_logging, get_logger
 from ai_trading_common.correlation import CorrelationMiddleware, get_correlation_headers, get_correlation_id
@@ -41,6 +41,7 @@ from ai_trading_common.sentry_setup import setup_sentry
 from ai_trading_common.security import (
     SecretError,
     BLOCKLIST,
+    MIN_SECRET_BYTES,
     require_secret,
     require_config,
     sign_token,
@@ -63,6 +64,7 @@ __all__ = [
     "setup_sentry",
     "SecretError",
     "BLOCKLIST",
+    "MIN_SECRET_BYTES",
     "require_secret",
     "require_config",
     "sign_token",

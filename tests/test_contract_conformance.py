@@ -58,8 +58,12 @@ def test_require_secret_signature_matches_contract() -> None:
 
     assert kwonly["name"].default == "secret"
     assert kwonly["allow_insecure"].default is False
+    # v0.4.1 additive, backward-compatible amendment: new keyword-only
+    # min_length guard (default = MIN_SECRET_BYTES = 32). Existing callers
+    # that pass only value/name/allow_insecure are unaffected.
+    assert kwonly["min_length"].default == 32
 
-    assert list(kwonly.keys()) == ["name", "allow_insecure"]
+    assert list(kwonly.keys()) == ["name", "allow_insecure", "min_length"]
 
 
 def test_require_config_signature_matches_contract() -> None:
