@@ -89,6 +89,48 @@ def test_discover_ignores_non_sql_files(tmp_path: Path) -> None:
     assert [m.migration_id for m in result] == ["001_real"]
 
 
+# ---------- v0.4.2: __rollback forward-filter (de-vendor superset) ----------
+
+def test_discover_excludes_rollback_scripts_from_forward(tmp_path: Path) -> None:
+    # A forward migration + its rollback companion in the SAME dir: only the
+    # forward one is discovered. Running the rollback as a forward migration
+    # would drop what the forward just created (ScreenerService start.sh boot).
+    _write(tmp_path, "V1__create_multibagger_runs.sql")
+    _write(tmp_path, "V1__rollback_create_multibagger_runs.sql")
+    result = discover_migrations(tmp_path)
+    ids = [m.migration_id for m in result]
+    assert ids == ["V1__create_multibagger_runs"]
+    assert not any("rollback" in i.lower() for i in ids)
+
+
+def test_discover_rollback_filter_is_case_insensitive(tmp_path: Path) -> None:
+    _write(tmp_path, "V2__create_x.sql")
+    _write(tmp_path, "V2__ROLLBACK_create_x.sql")
+    _write(tmp_path, "V3__Rollback_Weird.sql")
+    ids = [m.migration_id for m in discover_migrations(tmp_path)]
+    assert ids == ["V2__create_x"]
+
+
+def test_discover_keeps_forward_when_no_rollback_present(tmp_path: Path) -> None:
+    _write(tmp_path, "V1__create_a.sql")
+    _write(tmp_path, "V2__create_b.sql")
+    ids = [m.migration_id for m in discover_migrations(tmp_path)]
+    assert ids == ["V1__create_a", "V2__create_b"]
+
+
+def test_discover_keeps_forward_migration_with_single_underscore_rollback_word(
+    tmp_path: Path,
+) -> None:
+    # Specificity guard: the exclusion is DOUBLE-underscore `__rollback` (the
+    # undo-script convention), NOT a bare `rollback` substring. A legitimate
+    # forward migration that merely mentions "rollback" as a word (single
+    # underscore) must NOT be dropped. Locks the filter so a future
+    # over-broad refactor to `"rollback" in stem` fails here.
+    _write(tmp_path, "V5__create_rollback_audit_table.sql")
+    ids = [m.migration_id for m in discover_migrations(tmp_path)]
+    assert ids == ["V5__create_rollback_audit_table"]
+
+
 # ---------- advisory lock key derivation ----------
 
 def test_advisory_lock_key_is_stable_per_service() -> None:
