@@ -30,7 +30,7 @@ Each service should:
    shared package.
 """
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 from ai_trading_common.logging_config import setup_logging, get_logger
 from ai_trading_common.correlation import CorrelationMiddleware, get_correlation_headers, get_correlation_id
