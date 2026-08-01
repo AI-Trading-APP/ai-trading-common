@@ -40,6 +40,7 @@ import jwt
 __all__ = [
     "SecretError",
     "BLOCKLIST",
+    "MIN_SECRET_BYTES",
     "require_secret",
     "require_config",
     "sign_token",
@@ -47,6 +48,12 @@ __all__ = [
 ]
 
 _logger = logging.getLogger(__name__)
+
+# Minimum acceptable secret length, in UTF-8 bytes. RFC 7518 §3.2 requires an
+# HMAC key at least as long as the hash output — 256 bits / 32 bytes for
+# HS256 — so ``require_secret`` rejects anything below this by default
+# (v0.4.1), closing the "weak-but-not-blocklisted secret slips through" gap.
+MIN_SECRET_BYTES: int = 32
 
 
 class SecretError(RuntimeError):
@@ -61,10 +68,12 @@ class SecretError(RuntimeError):
 
 
 # Known-leaked / placeholder secret literals, normalized via
-# ``.strip().casefold()``. Some entries are "prefix-family" literals that
-# must ALSO match as a case-insensitive substring of a longer value (e.g.
-# regimeservice's "dev-only-<anything>-change-me" family) — substring
-# matching for those specific entries is handled in ``require_secret``.
+# ``.strip().casefold()``. Matching against this exact set is done in
+# ``_is_blocklisted``. Separately, some insecure literals come in a whole
+# FAMILY sharing a fixed prefix AND suffix (e.g. regimeservice's
+# "dev-only-<anything>-change-me"); those are matched by the
+# prefix+suffix-anchored patterns in ``_PREFIX_SUFFIX_FAMILIES`` — anchored
+# at both ends of the value, NOT a free-floating substring match.
 BLOCKLIST: frozenset[str] = frozenset(
     {
         "your-secret-key-change-in-production",
@@ -110,12 +119,24 @@ def require_secret(
     *,
     name: str = "secret",
     allow_insecure: bool = False,
+    min_length: int = MIN_SECRET_BYTES,
 ) -> str:
-    """Fail loud on a missing/blank/known-leaked secret value.
+    """Fail loud on a missing/blank/known-leaked/too-short secret value.
 
-    Invalid = ``None`` | ``""`` | whitespace-only | normalized value is a
-    member of :data:`BLOCKLIST` (including a blocklisted prefix-family
-    literal appearing as a case-insensitive substring of ``value``).
+    Invalid = ``None`` | ``""`` | whitespace-only | normalized value matches
+    :data:`BLOCKLIST` (an exact normalized member, OR a normalized
+    prefix-family pattern — see :data:`_PREFIX_SUFFIX_FAMILIES` — anchored at
+    BOTH the start and the end of the value, e.g.
+    ``"dev-only-regime-change-me"``) | fewer than ``min_length`` UTF-8 bytes.
+
+    The minimum-length guard (``min_length``, default
+    :data:`MIN_SECRET_BYTES` = 32 bytes) rejects weak-but-not-blocklisted
+    secrets: RFC 7518 §3.2 requires an HMAC key at least as long as the hash
+    output (256 bits / 32 bytes for HS256), so anything shorter is
+    cryptographically weak regardless of the blocklist. Length is measured in
+    UTF-8 BYTES (not Unicode code points) to match the actual HMAC key
+    material. Pass ``min_length=0`` to disable the check for a caller that
+    legitimately needs it (rare).
 
     Raises :class:`SecretError` on invalid, UNLESS ``allow_insecure=True``
     (intended only for an explicit local/test escape hatch) — in that case
@@ -131,6 +152,11 @@ def require_secret(
         normalized = _normalize(value)
         if _is_blocklisted(normalized):
             invalid_reason = "known-leaked/placeholder value (blocklisted)"
+        elif len(value.encode("utf-8")) < min_length:
+            invalid_reason = (
+                f"too short ({len(value.encode('utf-8'))} bytes; "
+                f"minimum is {min_length} bytes for a secure HMAC key)"
+            )
 
     if invalid_reason is None:
         return value  # type: ignore[return-value]  # value is guaranteed str here
@@ -239,6 +265,23 @@ def decode_token(
             valid_secrets.append(require_secret(candidate, name="verification-secret"))
         except SecretError as exc:
             secret_errors.append(exc)
+
+    # A candidate secret rejected as invalid (e.g. a legacy rotation secret
+    # shorter than the 32-byte floor) while OTHER candidates are still valid
+    # would otherwise be dropped silently — during a short→long rotation
+    # window that means tokens signed by the dropped secret fail with an
+    # opaque InvalidSignatureError and no diagnostic. Log it loudly so the
+    # operator can see a candidate was skipped, without weakening the guard.
+    if secret_errors and valid_secrets:
+        _logger.warning(
+            "decode_token: %d of %d candidate secret(s) were rejected as "
+            "invalid and skipped during verification (%s). If this is a "
+            "rotation window, tokens signed by a skipped secret will fail to "
+            "verify — confirm every active signing secret meets the guard.",
+            len(secret_errors),
+            len(candidates),
+            "; ".join(str(e) for e in secret_errors),
+        )
 
     if not valid_secrets:
         # Every candidate secret was itself invalid — this is a
