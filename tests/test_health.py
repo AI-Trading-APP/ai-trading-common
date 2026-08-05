@@ -81,6 +81,41 @@ def test_ready_returns_503_when_dependency_unhealthy(app: FastAPI) -> None:
     assert body["dependencies"]["postgres"]["latency_ms"] == 12.3
 
 
+def test_ready_3tuple_soft_fail_stays_200_with_degraded_annotation(app: FastAPI) -> None:
+    # v0.4.3: a 3-tuple (ok, latency, extras) with ok=True but a degraded
+    # annotation must return 200 AND surface the extras in the payload —
+    # the soft/optional-dependency semantics (ScreenerService yfinance
+    # soft-fail). Previously run_all crashed unpacking a 3-tuple → 503.
+    async def _soft_degraded() -> tuple:
+        return (True, 10.0, {"degraded": True, "warning": "IP-blocked; fallback in use", "cause_category": "IP-block"})
+
+    DependencyCheck.register("yfinance", _soft_degraded)
+    client = TestClient(app)
+    res = client.get("/health/ready")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "healthy"
+    yf = body["dependencies"]["yfinance"]
+    assert yf["status"] == "healthy"
+    assert yf["degraded"] is True
+    assert yf["warning"] == "IP-blocked; fallback in use"
+    assert yf["cause_category"] == "IP-block"
+
+
+def test_ready_3tuple_hard_fail_is_503(app: FastAPI) -> None:
+    # A 3-tuple with ok=False still drives a 503 (extras don't rescue a real
+    # unhealthy dependency).
+    async def _hard_down() -> tuple:
+        return (False, 5.0, {"detail": "connection refused"})
+
+    DependencyCheck.register("postgres", _hard_down)
+    client = TestClient(app)
+    res = client.get("/health/ready")
+    assert res.status_code == 503
+    assert res.json()["dependencies"]["postgres"]["status"] == "unhealthy"
+    assert res.json()["dependencies"]["postgres"]["detail"] == "connection refused"
+
+
 def test_ready_handles_dependency_timeout(app: FastAPI) -> None:
     async def _hangs() -> tuple[bool, float]:
         await asyncio.sleep(10)  # exceeds default 5s timeout

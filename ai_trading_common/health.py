@@ -68,11 +68,35 @@ class DependencyCheck:
         results = {}
         for name, fn in cls._checks.items():
             try:
-                ok, latency = await asyncio.wait_for(fn(), timeout=timeout)
-                results[name] = {
+                raw = await asyncio.wait_for(fn(), timeout=timeout)
+                # Support BOTH a 2-tuple (ok, latency_ms) and a 3-tuple
+                # (ok, latency_ms, extras) where extras is a dict carrying
+                # optional annotations (cause_category, last_known_good_ts,
+                # warning, degraded, detail). v0.4.3 restores 3-tuple support
+                # (present in an earlier ai-trading-common revision, dropped in
+                # the v0.4.x rewrite) so services with soft/optional/degraded
+                # dependency semantics — e.g. ScreenerService's yfinance
+                # soft-fail — can report ok=True with a degraded annotation
+                # instead of unpacking-crashing into a 503.
+                if len(raw) == 2:
+                    ok, latency = raw
+                    extras: dict = {}
+                else:
+                    ok, latency, extras = raw[0], raw[1], raw[2]
+                entry: dict = {
                     "status": "healthy" if ok else "unhealthy",
                     "latency_ms": round(latency, 1),
                 }
+                for field in (
+                    "cause_category",
+                    "last_known_good_ts",
+                    "warning",
+                    "degraded",
+                    "detail",
+                ):
+                    if isinstance(extras, dict) and extras.get(field) is not None:
+                        entry[field] = extras[field]
+                results[name] = entry
             except asyncio.TimeoutError:
                 results[name] = {"status": "unhealthy", "error": "timeout", "latency_ms": None}
             except Exception as e:
