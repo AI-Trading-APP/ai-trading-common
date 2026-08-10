@@ -95,9 +95,23 @@ BLOCKLIST: frozenset[str] = frozenset(
 # "dev-only-<anything>-change-me"), not just the one exact string. Each
 # entry here is (prefix, suffix); a normalized value matches the family if
 # it starts with the prefix AND ends with the suffix (arbitrary content in
-# between), which also covers the canonical exact literal itself.
+# between), which also covers the canonical exact literal itself. An empty
+# suffix ("") means "match any value with this prefix" — ``endswith("")`` is
+# always True.
+#
+# ``replace_with_`` / ``replace-with-`` (v0.4.4): unreplaced CI-secret-
+# injection placeholders of the shape ``REPLACE_WITH_GITHUB_SECRET_*`` /
+# ``REPLACE-WITH-*``. These are >=32 bytes and match no exact literal, so
+# WITHOUT this family ``require_secret`` would ACCEPT them — the exact
+# false-assurance gap that let the fleet silently sign JWTs with the
+# committed placeholder ``REPLACE_WITH_GITHUB_SECRET_JWT_SECRET_KEY`` until
+# it was rotated off (2026-08-10). The prefix is safe to blanket-block: no
+# genuine random secret (hex/base64/urlsafe) ever starts with the literal
+# ``replace_with_``/``replace-with-``.
 _PREFIX_SUFFIX_FAMILIES: tuple[tuple[str, str], ...] = (
     ("dev-only-", "change-me"),
+    ("replace_with_", ""),
+    ("replace-with-", ""),
 )
 
 
