@@ -89,6 +89,45 @@ def test_require_secret_prefix_family_substring_raises() -> None:
         require_secret("dev-only-regime-change-me", name="jwt-secret")
 
 
+# --- 5a: CI-placeholder family (v0.4.4) ------------------------------------
+# Unreplaced CI-secret-injection placeholders of the shape REPLACE_WITH_* /
+# REPLACE-WITH-* are >=32 bytes and match no exact literal, so before v0.4.4
+# require_secret ACCEPTED them — the false-assurance gap that let the fleet
+# sign JWTs with the committed placeholder REPLACE_WITH_GITHUB_SECRET_JWT_SECRET_KEY.
+
+
+@pytest.mark.parametrize(
+    "placeholder",
+    [
+        "REPLACE_WITH_GITHUB_SECRET_JWT_SECRET_KEY",  # the exact committed placeholder
+        "replace_with_github_secret_jwt_secret_key",  # lower-case
+        "  REPLACE_WITH_GITHUB_SECRET_JWT_SECRET_KEY  ",  # surrounding whitespace
+        "REPLACE_WITH_ANYTHING_ELSE",  # family, arbitrary suffix
+        "REPLACE-WITH-SOME-CI-SECRET",  # hyphen variant
+        "replace-with-x",  # hyphen variant, lower
+    ],
+)
+def test_require_secret_ci_placeholder_family_raises(placeholder: str) -> None:
+    with pytest.raises(SecretError):
+        require_secret(placeholder, name="jwt-secret")
+
+
+@pytest.mark.parametrize(
+    "real_secret",
+    [
+        "b7facc71" + "a1b2c3d4" * 5,  # 48-char hex, the rotated-fleet shape
+        "aGVsbG8td29ybGQtdGhpcy1pcy1hLXN0cm9uZy1zZWNyZXQtMDE=",  # base64
+        "s3cr3t-random-passphrase-with-plenty-of-entropy-01",  # passphrase
+        "replacements-are-fine-this-is-a-real-secret-value-01",  # starts "replace" but NOT "replace_with_"/"replace-with-"
+    ],
+)
+def test_require_secret_ci_placeholder_family_no_false_positive(real_secret: str) -> None:
+    # A genuine >=32-byte secret must still pass — the family prefix is narrow
+    # ("replace_with_"/"replace-with-"), which no random hex/base64/urlsafe
+    # secret begins with.
+    assert require_secret(real_secret, name="jwt-secret") == real_secret
+
+
 # --- 5b: minimum key-length guard (v0.4.1) ---------------------------------
 
 
