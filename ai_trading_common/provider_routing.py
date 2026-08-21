@@ -1,12 +1,12 @@
 """Provider/account routing primitives for AI workloads.
 
-This module deliberately does not depend on provider SDKs.  It selects an
+This module deliberately does not depend on provider SDKs. It selects an
 already-authorized account/project; the consuming service owns the actual
 Gemini/Claude/Codex transport and credentials.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Iterable
 
@@ -79,22 +79,12 @@ class ProviderAccountPool:
         account = self._accounts.get(account_id)
         if account is None:
             raise KeyError(account_id)
-        self._accounts[account_id] = ProviderAccount(
-            **{**account.__dict__, "state": state}
-        )
+        self._accounts[account_id] = replace(account, state=state)
 
     def disable(self, account_id: str) -> None:
         account = self._accounts.get(account_id)
         if account is None:
             raise KeyError(account_id)
-        self._accounts[account_id] = ProviderAccount(
-            id=account.id,
-            provider=account.provider,
-            project_id=account.project_id,
-            location=account.location,
-            priority=account.priority,
-            budget_usd=account.budget_usd,
-            reserve_usd=account.reserve_usd,
-            enabled=False,
-            state=AccountState.DISABLED,
+        self._accounts[account_id] = replace(
+            account, enabled=False, state=AccountState.DISABLED
         )
