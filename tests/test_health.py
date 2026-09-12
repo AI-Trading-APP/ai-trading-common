@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from ai_trading_common.health import DependencyCheck, configure_health
+from ai_trading_common.health import DependencyCheck, _service_meta, configure_health
 
 
 @pytest.fixture(autouse=True)
@@ -147,3 +147,73 @@ def test_ready_handles_dependency_exception() -> None:
     results = asyncio.run(DependencyCheck.run_all(timeout=1.0))
     assert results["flaky"]["status"] == "unhealthy"
     assert "boom" in results["flaky"]["error"]
+
+
+# --- configure_health call-style / dispatch coverage (R2 F1/F2/F9) -------
+
+
+def test_configure_health_keyword_args_mounts_and_sets_meta() -> None:
+    # F1: old v0.4.4 keyword names (app=, service_name=, version=) must
+    # keep working — and must actually mount the router + set meta, not
+    # just avoid raising.
+    app = FastAPI()
+    configure_health(app=app, service_name="kw-service", version="9.9.9")
+    assert _service_meta["name"] == "kw-service"
+    assert _service_meta["version"] == "9.9.9"
+    health_paths = sorted(p for p in app.openapi()["paths"] if p.startswith("/health"))
+    assert health_paths == ["/health", "/health/live", "/health/ready"]
+
+
+def test_configure_health_mixed_positional_app_and_keyword_name_version() -> None:
+    # configure_health(app, service_name=..., version=...) — app positional,
+    # name/version as keywords.
+    app = FastAPI()
+    configure_health(app, service_name="mixed-service", version="2.0.0")
+    assert _service_meta["name"] == "mixed-service"
+    assert _service_meta["version"] == "2.0.0"
+    health_paths = sorted(p for p in app.openapi()["paths"] if p.startswith("/health"))
+    assert health_paths == ["/health", "/health/live", "/health/ready"]
+
+
+def test_configure_health_name_first_sets_meta_and_mounts_nothing() -> None:
+    # F9: the ported test only inspected a fresh app that was never passed
+    # to configure_health, so it could never fail. Assert the route table
+    # of an unrelated, never-passed app is unchanged (nothing mounted
+    # anywhere) AND that _service_meta was actually updated.
+    app = FastAPI()
+    before_paths = sorted(app.openapi()["paths"])
+    configure_health("name-only-service", "3.3.3")
+    assert _service_meta["name"] == "name-only-service"
+    assert _service_meta["version"] == "3.3.3"
+    after_paths = sorted(app.openapi()["paths"])
+    assert after_paths == before_paths
+
+
+def test_configure_health_name_first_then_app_first_mounts_on_app() -> None:
+    # F9: ordering — name-first (no-op mount) followed later by app-first
+    # for the SAME service must still mount correctly on the app.
+    app = FastAPI()
+    configure_health("later-mounted-service", "1.2.3")
+    assert [p for p in app.openapi()["paths"] if p.startswith("/health")] == []
+
+    configure_health(app, "later-mounted-service", "1.2.3")
+    health_paths = sorted(p for p in app.openapi()["paths"] if p.startswith("/health"))
+    assert health_paths == ["/health", "/health/live", "/health/ready"]
+    assert _service_meta["name"] == "later-mounted-service"
+    assert _service_meta["version"] == "1.2.3"
+
+
+def test_configure_health_rejects_non_app_non_str_first_arg() -> None:
+    # F2: a bad first argument (neither app nor str) must raise TypeError,
+    # not silently take the name-first branch.
+    with pytest.raises(TypeError):
+        configure_health(object(), "x")
+
+
+def test_configure_health_rejects_api_router_first_arg() -> None:
+    # F2: an APIRouter is not a supported first argument (mounting onto a
+    # router directly, as distinct from mounting the health router ONTO an
+    # app, was never the documented contract) — TypeError, not a silent
+    # mis-dispatch into the name-first branch.
+    with pytest.raises(TypeError):
+        configure_health(APIRouter(), "x", "y")
