@@ -34,20 +34,40 @@ _service_meta = {"name": "unknown", "version": "0.0.0"}
 _configured_apps: "weakref.WeakSet[FastAPI]" = weakref.WeakSet()
 
 
-def configure_health(app: FastAPI, service_name: str, version: str) -> None:
-    """Set service metadata and mount the health router on `app`.
+def configure_health(app_or_name, service_name_or_ver: str = None, version: str = None) -> None:
+    """Set service metadata and (optionally) mount the health router on `app`.
 
-    One-call wire-up: stores name/version for the health responses, then
-    `app.include_router(health_router, tags=["health"])`. Idempotent —
-    safe to call again on the same app (router is mounted once per app).
+    Supports two call styles for backward-compatibility:
+
+        configure_health(app, name, ver)   # app-first (original signature)
+        configure_health(name, ver)        # name-first (no app)
+
+    The shim detects whether the first positional argument is a FastAPI /
+    Starlette application instance or a plain string name, and dispatches
+    accordingly. Both styles are idempotent and safe to call more than once —
+    the app-first style tracks mounted apps in a `WeakSet` (see
+    `_configured_apps` above for why route-introspection is not used).
     """
-    _service_meta["name"] = service_name
-    _service_meta["version"] = version
-    # Avoid double-mounting if the caller (or a test) re-runs this.
-    if app in _configured_apps:
-        return
-    app.include_router(health_router, tags=["health"])
-    _configured_apps.add(app)
+    from starlette.applications import Starlette
+
+    if isinstance(app_or_name, (FastAPI, Starlette)):
+        # Original (app, name, ver) style.
+        app: FastAPI = app_or_name
+        service_name: str = service_name_or_ver
+        ver: str = version
+        _service_meta["name"] = service_name
+        _service_meta["version"] = ver
+        # Avoid double-mounting if the caller (or a test) re-runs this.
+        if app in _configured_apps:
+            return
+        app.include_router(health_router, tags=["health"])
+        _configured_apps.add(app)
+    else:
+        # (name, ver) style — no app to mount on.
+        service_name = app_or_name          # first arg is actually the name
+        ver = service_name_or_ver           # second arg is the version
+        _service_meta["name"] = service_name
+        _service_meta["version"] = ver
 
 
 class DependencyCheck:
