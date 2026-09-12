@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .correlation import REQUEST_ID_HEADER, get_correlation_id
 
 
-class CauseCategory(str, Enum):
+class CauseCategory(StrEnum):
     """Shared taxonomy of failure root-causes (COM-1 / REQ-B5 / US-9).
 
     Values are stable strings — do NOT rename them once services ship;
