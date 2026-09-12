@@ -34,40 +34,69 @@ _service_meta = {"name": "unknown", "version": "0.0.0"}
 _configured_apps: "weakref.WeakSet[FastAPI]" = weakref.WeakSet()
 
 
-def configure_health(app_or_name, service_name_or_ver: str = None, version: str = None) -> None:
+def configure_health(
+    app_or_name=None,
+    service_name_or_ver: str = None,
+    version: str = None,
+    *,
+    app=None,
+    service_name=None,
+) -> None:
     """Set service metadata and (optionally) mount the health router on `app`.
 
-    Supports two call styles for backward-compatibility:
+    Supports two call styles for backward-compatibility, both positional
+    and keyword:
 
-        configure_health(app, name, ver)   # app-first (original signature)
-        configure_health(name, ver)        # name-first (no app)
+        configure_health(app, name, ver)                              # app-first, positional
+        configure_health(app=app, service_name=name, version=ver)     # app-first, keyword (original v0.4.4 kwarg names)
+        configure_health(app, service_name=name, version=ver)         # app-first, mixed
+        configure_health(name, ver)                                   # name-first (no app)
 
-    The shim detects whether the first positional argument is a FastAPI /
-    Starlette application instance or a plain string name, and dispatches
-    accordingly. Both styles are idempotent and safe to call more than once —
-    the app-first style tracks mounted apps in a `WeakSet` (see
-    `_configured_apps` above for why route-introspection is not used).
+    The shim detects whether the (positional-or-keyword-resolved) first
+    argument is a FastAPI / Starlette application instance or a plain string
+    name, and dispatches accordingly. Both styles are idempotent and safe to
+    call more than once — the app-first style tracks mounted apps in a
+    `WeakSet` (see `_configured_apps` above for why route-introspection is
+    not used).
+
+    Raises:
+        TypeError: if the resolved first argument is neither a FastAPI/
+            Starlette app nor a string service name (e.g. an `APIRouter`,
+            `None`, or any other object). Silently degrading on a bad first
+            argument was a defect in an earlier revision of this shim.
     """
     from starlette.applications import Starlette
 
-    if isinstance(app_or_name, (FastAPI, Starlette)):
-        # Original (app, name, ver) style.
-        app: FastAPI = app_or_name
-        service_name: str = service_name_or_ver
+    # Keyword-only `app=`/`service_name=` (the original v0.4.4 parameter
+    # names) take precedence when supplied; otherwise fall back to the
+    # positional/dual-purpose args.
+    resolved_app_or_name = app if app is not None else app_or_name
+    resolved_name = service_name if service_name is not None else service_name_or_ver
+
+    if isinstance(resolved_app_or_name, (FastAPI, Starlette)):
+        # app-first style: (app, name, ver).
+        app_obj: FastAPI = resolved_app_or_name
+        svc_name: str = resolved_name
         ver: str = version
-        _service_meta["name"] = service_name
+        _service_meta["name"] = svc_name
         _service_meta["version"] = ver
         # Avoid double-mounting if the caller (or a test) re-runs this.
-        if app in _configured_apps:
+        if app_obj in _configured_apps:
             return
-        app.include_router(health_router, tags=["health"])
-        _configured_apps.add(app)
-    else:
-        # (name, ver) style — no app to mount on.
-        service_name = app_or_name          # first arg is actually the name
-        ver = service_name_or_ver           # second arg is the version
-        _service_meta["name"] = service_name
+        app_obj.include_router(health_router, tags=["health"])
+        _configured_apps.add(app_obj)
+    elif isinstance(resolved_app_or_name, str):
+        # name-first style: (name, ver) — no app to mount on.
+        svc_name = resolved_app_or_name
+        ver = resolved_name
+        _service_meta["name"] = svc_name
         _service_meta["version"] = ver
+    else:
+        raise TypeError(
+            "configure_health() expects a FastAPI/Starlette app or a str "
+            f"service name as the first argument, got {type(resolved_app_or_name).__name__!r}. "
+            "An APIRouter is not a supported first argument."
+        )
 
 
 class DependencyCheck:
