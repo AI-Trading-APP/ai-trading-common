@@ -79,6 +79,48 @@ def test_require_secret_blocklist_case_and_whitespace_insensitive(variant: str) 
         require_secret(variant, name="jwt-secret")
 
 
+# --- 4a: insecure mesh-key literals (watchlistservice/PE, PR-34) -----------
+# "internal-dev-key" / "trainer-dev-key" are the literal INTERNAL_API_KEY
+# defaults watchlistservice and Prediction-Engine ship for mesh auth. Mesh
+# keys are short (< 32 bytes), so callers pass min_length=0 — these tests
+# confirm the BLOCKLIST match itself rejects them, not the length floor.
+
+
+@pytest.mark.parametrize("literal", ["internal-dev-key", "trainer-dev-key"])
+def test_require_secret_mesh_dev_key_raises_even_with_min_length_zero(
+    literal: str,
+) -> None:
+    with pytest.raises(SecretError):
+        require_secret(literal, name="INTERNAL_API_KEY", min_length=0)
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "Internal-Dev-Key",
+        "TRAINER-DEV-KEY",
+        "  internal-dev-key  ",
+        "  trainer-dev-key  ",
+    ],
+)
+def test_require_secret_mesh_dev_key_case_and_whitespace_insensitive(
+    variant: str,
+) -> None:
+    with pytest.raises(SecretError):
+        require_secret(variant, name="INTERNAL_API_KEY", min_length=0)
+
+
+def test_require_secret_mesh_dev_key_not_a_prefix_family() -> None:
+    # These are exact-literal blocks only, NOT a "-dev-key" prefix/suffix
+    # family — a random-looking 40-char key must pass unaffected.
+    real_mesh_key = "8f3a2c9d7e1b4f605a6b7c8d9e0f1a2b3c4d5e6f"  # 40 chars
+    assert len(real_mesh_key) == 40
+    assert (
+        require_secret(real_mesh_key, name="INTERNAL_API_KEY", min_length=0)
+        == real_mesh_key
+    )
+
+
 # --- 5: prefix-family substring match --------------------------------------
 
 

@@ -86,6 +86,8 @@ BLOCKLIST: frozenset[str] = frozenset(
         "placeholder",
         "change_me",  # CHANGE_ME normalized via casefold
         "local-dev-secret-key-for-testing-only",
+        "internal-dev-key",  # watchlistservice/PE insecure mesh key (PR-34 adversarial review)
+        "trainer-dev-key",  # watchlistservice/PE insecure mesh key (PR-34 adversarial review)
     }
 )
 
